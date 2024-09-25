@@ -4,7 +4,12 @@ import { globby } from 'globby'
 import path from 'node:path'
 import type { DesignSystem } from '../../tailwindcss/src/design-system'
 import { help } from './commands/help'
-import { migrate as migrateStylesheet } from './migrate'
+import {
+  analyze as analyzeStylesheets,
+  migrate as migrateStylesheet,
+  prepare as prepareStylesheet,
+  type Stylesheet,
+} from './migrate'
 import { migrate as migrateTemplate } from './template/migrate'
 import { parseConfig } from './template/parseConfig'
 import { args, type Arg } from './utils/args'
@@ -102,8 +107,21 @@ async function run() {
     // Ensure we are only dealing with CSS files
     files = files.filter((file) => file.endsWith('.css'))
 
+    // Analyze the stylesheets
+    let stylesheets: Stylesheet[] = files.map((file) => {
+      return {
+        file,
+      }
+    })
+
+    // Load and parse all stylesheets
+    await Promise.allSettled(stylesheets.map((sheet) => prepareStylesheet(sheet)))
+
+    // Analyze the stylesheets
+    await analyzeStylesheets(stylesheets)
+
     // Migrate each file
-    await Promise.allSettled(files.map((file) => migrateStylesheet(file)))
+    await Promise.allSettled(stylesheets.map((sheet) => migrateStylesheet(sheet)))
 
     success('Stylesheet migration complete.')
   }

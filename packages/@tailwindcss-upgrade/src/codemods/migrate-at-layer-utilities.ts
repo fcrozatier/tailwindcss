@@ -1,9 +1,10 @@
 import { type AtRule, type Comment, type Plugin, type Rule } from 'postcss'
 import SelectorParser from 'postcss-selector-parser'
 import { segment } from '../../../tailwindcss/src/utils/segment'
+import type { Stylesheet } from '../migrate'
 import { walk, WalkAction, walkDepth } from '../utils/walk'
 
-export function migrateAtLayerUtilities(): Plugin {
+export function migrateAtLayerUtilities(stylesheet: Stylesheet): Plugin {
   function migrate(atRule: AtRule) {
     // Only migrate `@layer utilities` and `@layer components`.
     if (atRule.params !== 'utilities' && atRule.params !== 'components') return
@@ -254,12 +255,18 @@ export function migrateAtLayerUtilities(): Plugin {
     }
 
     // Finally, replace the original `@layer utilities` with the new rules.
-    atRule.replaceWith(clones)
+    atRule.replaceWith(...clones)
   }
 
   return {
     postcssPlugin: '@tailwindcss/upgrade/migrate-at-layer-utilities',
-    OnceExit: (root) => {
+    OnceExit: (root, { atRule }) => {
+      if (stylesheet.layers?.includes('utilities')) {
+        let rule = atRule({ name: 'layer', params: 'utilities' })
+        rule.append(...root.nodes)
+        root.append(rule)
+      }
+
       // Migrate `@layer utilities` and `@layer components` into `@utility`.
       // Using this instead of the visitor API in case we want to use
       // postcss-nesting in the future.
@@ -280,6 +287,17 @@ export function migrateAtLayerUtilities(): Plugin {
               utilities.set(child.params, child)
             }
           }
+        })
+      }
+
+      // If the stylesheet is inside a layered import then we can remove the top-level layer directive we added
+      if (stylesheet.layers?.includes('utilities')) {
+        root.each((node) => {
+          if (node.type !== 'atrule') return
+          if (node.name !== 'layer') return
+          if (node.params !== 'utilities') return
+
+          node.replaceWith(node.nodes ?? [])
         })
       }
     },
