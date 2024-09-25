@@ -46,6 +46,11 @@ export async function migrate(stylesheet: Stylesheet) {
 export async function analyze(stylesheets: Stylesheet[]) {
   let markers = new Set<postcss.Node>()
 
+  console.log(
+    'stylesheets',
+    stylesheets.map((s) => s.file),
+  )
+
   let processor = postcss([
     postcssImport({
       plugins: [
