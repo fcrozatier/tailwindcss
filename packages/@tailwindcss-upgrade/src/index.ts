@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { globby } from 'globby'
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { DesignSystem } from '../../tailwindcss/src/design-system'
 import { help } from './commands/help'
@@ -9,6 +8,7 @@ import {
   analyze as analyzeStylesheets,
   migrate as migrateStylesheet,
   prepare as prepareStylesheet,
+  split as splitStylesheets,
   type Stylesheet,
 } from './migrate'
 import { migrate as migrateTemplate } from './template/migrate'
@@ -124,15 +124,15 @@ async function run() {
     // Migrate each file
     await Promise.allSettled(stylesheets.map((sheet) => migrateStylesheet(sheet)))
 
-    // Write all files
-    await Promise.allSettled(
-      stylesheets.map(async (sheet) => {
-        await fs.writeFile(sheet.file!, sheet.content!)
-      }),
-    )
+    // Split up stylesheets (as needed)
+    await splitStylesheets(stylesheets)
 
-    // Split each file (as needed)
-    // await Promise.allSettled(stylesheets.map((sheet) => migrateStylesheet(sheet)))
+    // Write all files
+    // await Promise.allSettled(
+    //   stylesheets.map(async (sheet) => {
+    //     await fs.writeFile(sheet.file!, sheet.root!.toString())
+    //   }),
+    // )
 
     success('Stylesheet migration complete.')
   }
