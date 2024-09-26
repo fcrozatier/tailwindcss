@@ -6,17 +6,14 @@ const css = dedent
 
 it('should print the input as-is', async () => {
   expect(
-    await migrateContents(
-      css`
+    await migrateContents(css`
+      /* above */
+      .foo/* after */ {
         /* above */
-        .foo/* after */ {
-          /* above */
-          color:  /* before */ red /* after */;
-          /* below */
-        }
-      `,
-      expect.getState().testPath,
-    ),
+        color:  /* before */ red /* after */;
+        /* below */
+      }
+    `),
   ).toMatchInlineSnapshot(`
     "/* above */
     .foo/* after */ {
