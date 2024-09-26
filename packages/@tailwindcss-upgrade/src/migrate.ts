@@ -45,6 +45,23 @@ export async function migrate(stylesheet: Stylesheet) {
 
 export async function analyze(stylesheets: Stylesheet[]) {
   let markers = new Set<postcss.Node>()
+  let processor = postcss([
+    postcssImport({
+      plugins: [
+        {
+          postcssPlugin: 'import-marker',
+          Once(root) {
+            let marker = postcss.comment({
+              text: 'tailwindcss-import-marker',
+              source: root.source,
+            })
+            markers.add(marker)
+            root.prepend(marker)
+          },
+        },
+      ],
+    }),
+  ])
 
   console.log(
     'stylesheets',
@@ -65,24 +82,7 @@ export async function analyze(stylesheets: Stylesheet[]) {
     if (!stylesheet.file) continue
     if (!stylesheet.root) continue
 
-    await postcss([
-      postcssImport({
-        root: path.dirname(stylesheet.file),
-        plugins: [
-          {
-            postcssPlugin: 'import-marker',
-            Once(root) {
-              let marker = postcss.comment({
-                text: 'tailwindcss-import-marker',
-                source: root.source,
-              })
-              markers.add(marker)
-              root.prepend(marker)
-            },
-          },
-        ],
-      }),
-    ]).process(stylesheet.root.clone(), {
+    await processor.process(stylesheet.root.clone(), {
       from: stylesheet.file,
     })
   }
@@ -121,6 +121,8 @@ export async function prepare(stylesheet: Stylesheet) {
   }
 
   if (stylesheet.content) {
-    stylesheet.root = postcss.parse(stylesheet.content)
+    stylesheet.root = postcss.parse(stylesheet.content, {
+      from: stylesheet.file,
+    })
   }
 }
