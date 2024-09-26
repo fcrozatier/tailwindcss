@@ -255,7 +255,7 @@ export function migrateAtLayerUtilities(stylesheet: Stylesheet): Plugin {
     }
 
     // Finally, replace the original `@layer utilities` with the new rules.
-    atRule.replaceWith(...clones)
+    atRule.replaceWith(clones)
   }
 
   return {
@@ -263,7 +263,7 @@ export function migrateAtLayerUtilities(stylesheet: Stylesheet): Plugin {
     OnceExit: (root, { atRule }) => {
       if (stylesheet.layers?.includes('utilities')) {
         let rule = atRule({ name: 'layer', params: 'utilities' })
-        rule.append(...root.nodes)
+        rule.append(root.nodes)
         root.append(rule)
       }
 
