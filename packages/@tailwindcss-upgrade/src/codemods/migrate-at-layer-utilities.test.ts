@@ -1,16 +1,24 @@
 import dedent from 'dedent'
 import postcss from 'postcss'
 import { describe, expect, it } from 'vitest'
+import type { Stylesheet } from '../migrate'
 import { formatNodes } from './format-nodes'
 import { migrateAtLayerUtilities } from './migrate-at-layer-utilities'
 
 const css = dedent
 
-function migrate(input: string) {
+function migrate(stylesheet: Stylesheet | string) {
+  if (typeof stylesheet === 'string') {
+    stylesheet = {
+      content: stylesheet,
+      root: postcss.parse(stylesheet),
+    }
+  }
+
   return postcss()
-    .use(migrateAtLayerUtilities())
+    .use(migrateAtLayerUtilities(stylesheet))
     .use(formatNodes())
-    .process(input, { from: expect.getState().testPath })
+    .process(stylesheet.root!, { from: expect.getState().testPath })
     .then((result) => result.css)
 }
 
