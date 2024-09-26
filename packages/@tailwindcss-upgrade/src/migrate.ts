@@ -40,7 +40,7 @@ export async function migrate(stylesheet: Stylesheet) {
     throw new Error('Cannot migrate a stylesheet without a file path')
   }
 
-  await fs.writeFile(stylesheet.file!, await migrateContents(stylesheet))
+  stylesheet.content = await migrateContents(stylesheet)
 }
 
 export async function analyze(stylesheets: Stylesheet[]) {

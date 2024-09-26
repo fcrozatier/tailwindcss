@@ -242,11 +242,25 @@ test(
       css`
         @import 'tailwindcss';
         @import './utilities.css' layer(utilities);
+        @import './utilities.twupgrade.css';
       `,
     )
 
-    await fs.expectFileToContain(
+    await fs.expectFileNotToContain(
       'src/utilities.css',
+      css`
+        @utility no-scrollbar {
+          &::-webkit-scrollbar {
+            display: none;
+          }
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `,
+    )
+
+    await fs.expectFileNotToContain(
+      'src/utilities.twupgrade.css',
       css`
         @utility no-scrollbar {
           &::-webkit-scrollbar {
@@ -259,3 +273,67 @@ test(
     )
   },
 )
+
+// test.debug(
+//   'wip it',
+//   {
+//     fs: {
+//       'package.json': json`
+//         {
+//           "dependencies": {
+//             "tailwindcss": "workspace:^",
+//             "@tailwindcss/cli": "workspace:^",
+//             "@tailwindcss/upgrade": "workspace:^"
+//           }
+//         }
+//       `,
+//       'src/index.html': html`
+//         <div class="hover:no-scrollbar hover:foo"></div>
+//       `,
+//       'src/index.css': css`
+//         @import 'tailwindcss';
+//         @import './c.css' layer(foo);
+//         @import './a.css' layer(utilities);
+//         @import './b.css' layer(components);
+
+//         @layer thing {
+//           @utility foo {
+//             color: red;
+//           }
+//         }
+//       `,
+//       'src/a.css': css`@import './utilities.css';`,
+//       'src/b.css': css`@import './utilities.css';`,
+//       'src/c.css': css`@import './utilities.css';`,
+//       'src/utilities.css': css`
+//         .no-scrollbar::-webkit-scrollbar {
+//           display: none;
+//         }
+
+//         .no-scrollbar {
+//           -ms-overflow-style: none;
+//           scrollbar-width: none;
+//         }
+//       `,
+//     },
+//   },
+//   async ({ fs, exec }) => {
+//     await exec('npx @tailwindcss/upgrade --force')
+
+//     expect(await fs.read('src/utilities.css')).toMatchInlineSnapshot(`
+//       "@utility no-scrollbar {
+//         &::-webkit-scrollbar {
+//           display: none;
+//         }
+//         -ms-overflow-style: none;
+//         scrollbar-width: none;
+//       }"
+//     `)
+
+//     // await exec('npx @tailwindcss/cli -i src/index.css -o out.css')
+
+//     // expect(await fs.read('out.css')).toMatchInlineSnapshot()
+//   },
+// )
+
+// /Users/jordanpittman/Developer/tailwind-labs/projects/tailwindcss/.debug/tailwind-integrationsdFIS2ktn6mRt
