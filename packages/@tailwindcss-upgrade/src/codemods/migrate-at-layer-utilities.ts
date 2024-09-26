@@ -261,7 +261,10 @@ export function migrateAtLayerUtilities(stylesheet: Stylesheet): Plugin {
   return {
     postcssPlugin: '@tailwindcss/upgrade/migrate-at-layer-utilities',
     OnceExit: (root, { atRule }) => {
-      if (stylesheet.layers?.includes('utilities')) {
+      let isUtilityStylesheet =
+        stylesheet.layers?.includes('utilities') || stylesheet.layers?.includes('components')
+
+      if (isUtilityStylesheet) {
         let rule = atRule({ name: 'layer', params: 'utilities' })
         rule.append(root.nodes)
         root.append(rule)
@@ -291,7 +294,7 @@ export function migrateAtLayerUtilities(stylesheet: Stylesheet): Plugin {
       }
 
       // If the stylesheet is inside a layered import then we can remove the top-level layer directive we added
-      if (stylesheet.layers?.includes('utilities')) {
+      if (isUtilityStylesheet) {
         root.each((node) => {
           if (node.type !== 'atrule') return
           if (node.name !== 'layer') return

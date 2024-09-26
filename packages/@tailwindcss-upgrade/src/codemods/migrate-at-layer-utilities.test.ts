@@ -828,3 +828,182 @@ it('should not lose attribute selectors', async () => {
     }"
   `)
 })
+
+describe('layered stylesheets', () => {
+  it('should transform classes to utilities inside a layered stylesheet (utilities)', async () => {
+    expect(
+      await migrate({
+        root: postcss.parse(css`
+          /* Utility #1 */
+          .foo {
+            /* Declarations: */
+            color: red;
+          }
+        `),
+        layers: ['utilities'],
+      }),
+    ).toMatchInlineSnapshot(`
+      "@utility foo {
+        /* Utility #1 */
+        /* Declarations: */
+        color: red;
+      }"
+    `)
+  })
+
+  it('should transform classes to utilities inside a layered stylesheet (components)', async () => {
+    expect(
+      await migrate({
+        root: postcss.parse(css`
+          /* Utility #1 */
+          .foo {
+            /* Declarations: */
+            color: red;
+          }
+        `),
+        layers: ['components'],
+      }),
+    ).toMatchInlineSnapshot(`
+      "@utility foo {
+        /* Utility #1 */
+        /* Declarations: */
+        color: red;
+      }"
+    `)
+  })
+
+  it('should NOT transform classes to utilities inside a non-utility, layered stylesheet', async () => {
+    expect(
+      await migrate({
+        root: postcss.parse(css`
+          /* Utility #1 */
+          .foo {
+            /* Declarations: */
+            color: red;
+          }
+        `),
+        layers: ['foo'],
+      }),
+    ).toMatchInlineSnapshot(`
+      "/* Utility #1 */
+      .foo {
+        /* Declarations: */
+        color: red;
+      }"
+    `)
+  })
+
+  it('should handle non-classes in utility-layered stylesheets', async () => {
+    expect(
+      await migrate({
+        root: postcss.parse(css`
+          /* Utility #1 */
+          .foo {
+            /* Declarations: */
+            color: red;
+          }
+          #main {
+            color: red;
+          }
+        `),
+        layers: ['utilities'],
+      }),
+    ).toMatchInlineSnapshot(`
+      "
+      #main {
+        color: red;
+      }
+
+      @utility foo {
+        /* Utility #1 */
+        /* Declarations: */
+        color: red;
+      }"
+    `)
+  })
+
+  it('should handle non-classes in utility-layered stylesheets', async () => {
+    expect(
+      await migrate({
+        root: postcss.parse(css`
+          @layer utilities {
+            @layer utilities {
+              /* Utility #1 */
+              .foo {
+                /* Declarations: */
+                color: red;
+              }
+            }
+
+            /* Utility #2 */
+            .bar {
+              /* Declarations: */
+              color: red;
+            }
+
+            #main {
+              color: red;
+            }
+          }
+
+          /* Utility #3 */
+          .baz {
+            /* Declarations: */
+            color: red;
+          }
+
+          #secondary {
+            color: red;
+          }
+        `),
+        layers: ['utilities'],
+      }),
+    ).toMatchInlineSnapshot(`
+      "@layer utilities {
+
+        #main {
+          color: red;
+        }
+      }
+
+      #secondary {
+        color: red;
+      }
+
+      @utility foo {
+        @layer utilities {
+          @layer utilities {
+            /* Utility #1 */
+            /* Declarations: */
+            color: red;
+          }
+        }
+      }
+
+      @utility bar {
+        @layer utilities {
+          /* Utility #2 */
+          /* Declarations: */
+          color: red;
+        }
+      }
+
+      @utility baz {
+        /* Utility #3 */
+        /* Declarations: */
+        color: red;
+      }"
+    `)
+  })
+
+  it('imports are preserved in layered stylesheets', async () => {
+    expect(
+      await migrate({
+        root: postcss.parse(css`
+          @import 'thing';
+        `),
+        layers: ['utilities'],
+      }),
+    ).toMatchInlineSnapshot(`"@import 'thing';"`)
+  })
+})
