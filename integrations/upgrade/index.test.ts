@@ -307,6 +307,11 @@ test.debug(
     await exec('npx @tailwindcss/upgrade --force')
 
     expect(await fs.read('src/utilities.css')).toMatchInlineSnapshot(`""`)
+    expect(await fs.read('src/utilities.utilities.css')).toMatchInlineSnapshot(`
+      "@utility thing {
+        color: red;
+      }"
+    `)
 
     // await exec('npx @tailwindcss/cli -i src/index.css -o out.css')
 

@@ -8,6 +8,7 @@ import { migrateAtLayerUtilities } from './codemods/migrate-at-layer-utilities'
 import { migrateMissingLayers } from './codemods/migrate-missing-layers'
 import { migrateTailwindDirectives } from './codemods/migrate-tailwind-directives'
 import { walk, WalkAction } from './utils/walk'
+import { segment } from '../../tailwindcss/src/utils/segment'
 
 export interface Stylesheet {
   file?: string
@@ -45,43 +46,7 @@ export async function migrate(stylesheet: Stylesheet) {
 }
 
 export async function analyze(stylesheets: Stylesheet[]) {
-  let locationMarkers = new Set<postcss.Node>()
-  let markers = new Set<postcss.Node>()
-
-  let processor = postcss([
-    {
-      postcssPlugin: 'import-thing',
-      Once(root) {
-        root.walkAtRules('import', (node) => {
-          let markerStart = postcss.comment({
-            text: `import-marker-start: ${node.source?.input.file}`,
-            raws: {
-              file: node.source?.input.file,
-              params: node.params,
-            },
-          })
-          locationMarkers.add(markerStart)
-
-          node.replaceWith([markerStart, node.clone()])
-        })
-      },
-    },
-    postcssImport({
-      plugins: [
-        {
-          postcssPlugin: 'import-marker',
-          Once(root) {
-            let marker = postcss.comment({
-              text: `imported-file-marker: ${root.source!.input.file}`,
-              source: root.source,
-            })
-            markers.add(marker)
-            root.prepend(marker)
-          },
-        },
-      ],
-    }),
-  ])
+  let mediaWrapper = `__wrapper__${Math.random().toString(16).slice(3, 8)}__`
 
   let stylesheetsByFile = new Map<string, Stylesheet>()
   for (let stylesheet of stylesheets) {
@@ -93,71 +58,152 @@ export async function analyze(stylesheets: Stylesheet[]) {
     stylesheet.importRules ??= []
   }
 
-  // Run stylesheets through `postcss-import` and record dependencies
-  for (let sheet of stylesheets) {
-    if (!sheet.file) continue
-    if (!sheet.root) continue
+  // A list of all marker nodes used to annotate and analyze the AST
+  let importMarkers = new Set<postcss.Node>()
+  let fileMarkers = new Set<postcss.Node>()
 
-    await processor.process(sheet.root.clone(), { from: sheet.file })
-  }
+  let processor = postcss([
+    // Step 1: Add markers around the `@import` rules
+    //
+    // We need to mark the start and end of each `@import` rule so we can
+    // keep track of where they were in the original AST. We do this by cloning
+    // the node, renaming the original, and adding start/end markers around it.
+    {
+      postcssPlugin: 'import-thing',
+      Once(root) {
+        let imports = new Set<AtRule>()
 
-  // Associate the original `@import` node with each location marker
-  for (let sheet of stylesheets) {
-    if (!sheet.file) continue
-    if (!sheet.root) continue
+        root.walkAtRules('import', (node) => {
+          imports.add(node)
+        })
 
-    sheet.root.walkAtRules('import', (atRule) => {
-      let sourceFile = atRule.source?.input.file
-      let params = atRule.params
+        for (let node of imports) {
+          // Duplicate the `@import` rule
+          // this will be the one that `postcss-import` processes
+          node.cloneAfter({
+            params: `${node.params} ${mediaWrapper}`
+          })
 
-      for (let marker of locationMarkers) {
-        let markerFile = marker.raws.file
-        let markerParams = marker.raws.params
+          // Replace the original `@import` rule with a dummy comment
+          // it'll retain the original node in `raws`
+          let importMarker = postcss.comment({
+            text: `__import_node__`,
+            raws: { original: node },
+          })
 
-        if (markerFile !== sourceFile) continue
-        if (markerParams !== params) continue
-
-        marker.raws.importRules ??= []
-        marker.raws.importRules.push(atRule)
-      }
-    })
-  }
-
-  // Walk up the graph from every marker to record potential layer metadata
-  for (let marker of markers) {
-    let sourceFile = marker.source?.input.file
-    if (!sourceFile) continue
-
-    let stylesheet = stylesheetsByFile.get(sourceFile)
-    if (!stylesheet) continue
-
-    // Get the original at-rule that caused this import
-    // let importLocationMarker = marker.prev()
-    // if (importLocationMarker?.type !== 'comment') {
-    //   throw new Error(marker.root().toString())
-
-    //   // TODO: Can this actually ever happen idk?
-    //   throw new Error('Expected a comment before the import marker')
-    // }
-
-    stylesheet.importRules!.push(...(importLocationMarker.raws.importRules as any))
-
-    let node = marker
-
-    while (node.parent) {
-      let parent = node.parent
-      if (parent.type === 'atrule') {
-        let atRule = parent as postcss.AtRule
-
-        if (atRule.name === 'layer') {
-          stylesheet.layers!.push(atRule.params)
-        } else if (atRule.name === 'media') {
-          stylesheet.media!.push(atRule.params)
+          importMarkers.add(importMarker)
+          node.replaceWith(importMarker)
         }
-      }
+      },
+    },
 
-      node = parent
-    }
+    // Step 2: Expand `@import` rules and mark imported files
+    //
+    // Since valid imports are only at the top some files may not have any other
+    // nodes we can use to determine where in the AST a file was imported. To
+    // solve this, we'll add a marker at the top of each imported file which
+    // guarantees that we have a way to determine where the file was imported.
+    postcssImport({
+      plugins: [
+        {
+          postcssPlugin: 'import-marker',
+          Once(root) {
+            let marker = postcss.comment({
+              text: `marker:imported-file`,
+              source: root.source,
+            })
+
+            fileMarkers.add(marker)
+            root.prepend(marker)
+          },
+        },
+      ],
+    }),
+
+    // Step 3: Analyze the AST so each stylesheet can have each import node
+    // associated with it
+    {
+      postcssPlugin: 'import-thing2',
+      Once() {
+        // Associate import nodes with each stylesheet
+        for (let fileMarker of fileMarkers) {
+          let sourceFile = fileMarker.source?.input.file
+          if (!sourceFile) continue
+
+          let stylesheet = stylesheetsByFile.get(sourceFile)
+          if (!stylesheet) continue
+
+          // Find the closest import marker that precedes the file marker
+          let node = fileMarker
+
+          while (node) {
+            if (importMarkers.has(node)) {
+              break
+            }
+
+            let prev = node.prev()
+
+            if (prev) {
+              // Walk backwards until we find a node that is a marker
+              node = prev
+            } else if (node.parent) {
+              // If there are no earlier siblings, go up a level and try again
+              node = node.parent
+            } else {
+              break
+            }
+          }
+
+          // We were unable to find an import marker
+          // TODO: This should be an error
+          if (node === fileMarker) continue
+
+          // TODO: This shouldn't be possible
+          if (!node.raws.original) continue
+
+          stylesheet.importRules!.push(node.raws.original as AtRule)
+        }
+
+        // Analyze import nodes to determine layers
+        for (let sheet of stylesheets) {
+          for (let node of sheet.importRules ?? []) {
+            let parts = segment(node.params, ' ')
+            for (let part of parts) {
+              if (!part.startsWith('layer(')) continue
+              if (!part.endsWith(')')) continue
+
+              let layers = segment(part.slice(6, -1), ',').map(name => name.trim())
+
+              sheet.layers!.push(...layers)
+            }
+          }
+        }
+      },
+    },
+
+    // Step 4: Restore the AST to its original state
+    {
+      postcssPlugin: 'import-thing2',
+      Once(root) {
+        // Replace the dummy comment nodes with the original `@import` nodes
+        for (let node of importMarkers) {
+          node.replaceWith(node.raws.original)
+        }
+
+        // Remove all imported nodes
+        root.walkAtRules('media', (rule) => {
+          if (!rule.params.includes(mediaWrapper)) return
+          rule.remove()
+        })
+      },
+    },
+  ])
+
+  for (let sheet of stylesheets) {
+    if (!sheet.file) continue
+    if (!sheet.root) continue
+
+    await processor.process(sheet.root, { from: sheet.file })
   }
 }
 
@@ -216,21 +262,26 @@ export async function split(stylesheets: Stylesheet[]) {
 
     // Modify the import of this stylesheet to also import the new utilities stylesheet
     // this has to be done transitively so we might end up introducing additional stylesheets
-    let imports = new Set<AtRule>()
+    for (let node of sheet.importRules ?? []) {
+      let parts = segment(node.params, ' ')
 
-    sheet.root.walkAtRules('import', (node) => {
-      imports.add(node)
-    })
+      for (let i = 0; i < parts.length; ++i) {
+        let part = parts[i]
+        if (!part.startsWith('layer(')) continue
+        if (!part.endsWith(')')) continue
 
-    let processor = postcss([postcssImport()])
+        parts[i] = segment(part.slice(6, -1), ',')
+          .map(name => name.trim())
+          .filter(name => {
+            if (name === 'utilities') return false
+            if (name === 'components') return false
+            return true
+          })
+          .join(',')
+      }
 
-    for (let node of imports) {
-      let root = postcss.root({ nodes: [node.clone()] })
-      await processor.process(root, { from: sheet.file })
+      node.params = parts.join(' ')
     }
-
-    // sheet.parents
-    // sheet.importNodes
   }
 
   return stylesheets
