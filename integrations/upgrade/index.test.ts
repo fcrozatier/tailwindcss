@@ -206,7 +206,7 @@ test(
   },
 )
 
-test.debug(
+test(
   'migrate utilities in an imported file',
   {
     fs: {
