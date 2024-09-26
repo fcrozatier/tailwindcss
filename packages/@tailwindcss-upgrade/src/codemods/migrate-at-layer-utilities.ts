@@ -87,6 +87,12 @@ export function migrateAtLayerUtilities(stylesheet: Stylesheet): Plugin {
       clones.push(clone)
 
       walk(clone, (node) => {
+        if (node.type === 'atrule') {
+          if (!node.nodes || node.nodes?.length === 0) {
+            node.remove()
+          }
+        }
+
         if (node.type !== 'rule') return
 
         // Fan out each utility into its own rule.

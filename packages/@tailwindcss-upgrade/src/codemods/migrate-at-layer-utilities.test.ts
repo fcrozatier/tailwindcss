@@ -1001,9 +1001,40 @@ describe('layered stylesheets', () => {
       await migrate({
         root: postcss.parse(css`
           @import 'thing';
+
+          .foo {
+            color: red;
+          }
         `),
         layers: ['utilities'],
       }),
-    ).toMatchInlineSnapshot(`"@import 'thing';"`)
+    ).toMatchInlineSnapshot(`
+      "@import 'thing';
+
+      @utility foo {
+        color: red;
+      }"
+    `)
+  })
+
+  it('charset is preserved in layered stylesheets', async () => {
+    expect(
+      await migrate({
+        root: postcss.parse(css`
+          @charset "utf-8";
+
+          .foo {
+            color: red;
+          }
+        `),
+        layers: ['utilities'],
+      }),
+    ).toMatchInlineSnapshot(`
+      "@charset "utf-8";
+
+      @utility foo {
+        color: red;
+      }"
+    `)
   })
 })
