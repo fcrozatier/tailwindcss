@@ -51,24 +51,6 @@ export async function analyze(stylesheets: Stylesheet[]) {
     stylesheets.map((s) => s.file),
   )
 
-  let processor = postcss([
-    postcssImport({
-      plugins: [
-        {
-          postcssPlugin: 'import-marker',
-          Once(root) {
-            let marker = postcss.comment({
-              text: 'tailwindcss-import-marker',
-              source: root.source,
-            })
-            markers.add(marker)
-            root.prepend(marker)
-          },
-        },
-      ],
-    }),
-  ])
-
   let stylesheetsByFile = new Map<string, Stylesheet>()
   for (let stylesheet of stylesheets) {
     if (!stylesheet.file) continue
@@ -83,7 +65,24 @@ export async function analyze(stylesheets: Stylesheet[]) {
     if (!stylesheet.file) continue
     if (!stylesheet.root) continue
 
-    await processor.process(stylesheet.root.clone(), {
+    await postcss([
+      postcssImport({
+        root: path.dirname(stylesheet.file),
+        plugins: [
+          {
+            postcssPlugin: 'import-marker',
+            Once(root) {
+              let marker = postcss.comment({
+                text: 'tailwindcss-import-marker',
+                source: root.source,
+              })
+              markers.add(marker)
+              root.prepend(marker)
+            },
+          },
+        ],
+      }),
+    ]).process(stylesheet.root.clone(), {
       from: stylesheet.file,
     })
   }
