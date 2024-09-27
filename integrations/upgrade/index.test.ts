@@ -294,11 +294,34 @@ test.debug(
       'src/index.css': css`
         @import 'tailwindcss/utilities';
         @import './a.css' layer(utilities);
+        @import './b.css' layer(components);
       `,
-      'src/a.css': css`@import './utilities.css';`,
-      'src/utilities.css': css`
-        .thing {
+      'src/a.css': css`
+        @import './utilities.css';
+
+        .foo-from-a {
           color: red;
+        }
+      `,
+      'src/utilities.css': css`
+        #foo {
+          --keep: me;
+        }
+
+        .foo-from-import {
+          color: blue;
+        }
+      `,
+      'src/b.css': css`
+        @import './components.css';
+
+        .bar-from-b {
+          color: red;
+        }
+      `,
+      'src/components.css': css`
+        .bar-from-import {
+          color: blue;
         }
       `,
     },
@@ -306,9 +329,35 @@ test.debug(
   async ({ fs, exec }) => {
     await exec('npx @tailwindcss/upgrade --force')
 
-    expect(await fs.read('src/utilities.css')).toMatchInlineSnapshot(`""`)
-    expect(await fs.read('src/utilities.utilities.css')).toMatchInlineSnapshot(`
-      "@utility thing {
+    expect(await fs.read('src/index.css')).toMatchInlineSnapshot(`
+      "@import 'tailwindcss/utilities' layer(utilities);
+      @import './a.css' layer(utilities);
+      @import './a.utilities.css';
+      @import './b.css';"
+    `)
+    expect(await fs.read('src/a.css')).toMatchInlineSnapshot(`"@import './utilities.css'"`)
+    expect(await fs.read('src/utilities.css')).toMatchInlineSnapshot(`
+      "#foo {
+        --keep: me;
+      }"
+    `)
+    expect(await fs.read('src/a.utilities.css')).toMatchInlineSnapshot(`
+      "
+
+      @utility foo-from-import {
+        color: blue;
+      }
+
+      @utility foo-from-a {
+        color: red;
+      }"
+    `)
+    expect(await fs.read('src/b.css')).toMatchInlineSnapshot(`
+      "@utility bar-from-import {
+        color: blue;
+      }
+
+      @utility bar-from-b {
         color: red;
       }"
     `)
