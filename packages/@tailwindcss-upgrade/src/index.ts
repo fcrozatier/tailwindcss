@@ -110,11 +110,7 @@ async function run() {
     files = files.filter((file) => file.endsWith('.css'))
 
     // Analyze the stylesheets
-    let stylesheets: Stylesheet[] = files.map((file) => {
-      return {
-        file,
-      }
-    })
+    let stylesheets: Stylesheet[] = files.map((file) => ({ file }))
 
     // Load and parse all stylesheets
     await Promise.allSettled(stylesheets.map((sheet) => prepareStylesheet(sheet)))
@@ -129,11 +125,11 @@ async function run() {
     await splitStylesheets(stylesheets)
 
     // Write all files
-    await Promise.allSettled(
-      stylesheets.map(async (sheet) => {
-        await fs.writeFile(sheet.file!, sheet.root!.toString())
-      }),
-    )
+    // await Promise.allSettled(
+    //   stylesheets.map(async (sheet) => {
+    //     await fs.writeFile(sheet.file!, sheet.root!.toString())
+    //   }),
+    // )
 
     success('Stylesheet migration complete.')
   }

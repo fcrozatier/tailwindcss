@@ -16,8 +16,9 @@ export interface Stylesheet {
   content?: string | null
   root?: postcss.Root | null
   layers?: string[]
-  media?: string[]
-  importRules?: AtRule[]
+
+  parents?: Set<Stylesheet>
+  importRules?: Set<AtRule>
 }
 
 export async function migrateContents(stylesheet: Stylesheet | string) {
@@ -54,8 +55,8 @@ export async function analyze(stylesheets: Stylesheet[]) {
     stylesheetsByFile.set(stylesheet.file, stylesheet)
 
     stylesheet.layers ??= []
-    stylesheet.media ??= []
-    stylesheet.importRules ??= []
+    stylesheet.importRules ??= new Set()
+    stylesheet.parents ??= new Set()
   }
 
   // A list of all marker nodes used to annotate and analyze the AST
@@ -161,7 +162,7 @@ export async function analyze(stylesheets: Stylesheet[]) {
           // TODO: This shouldn't be possible
           if (!node.raws.original) continue
 
-          stylesheet.importRules!.push(node.raws.original as AtRule)
+          stylesheet.importRules!.add(node.raws.original as AtRule)
         }
 
         // Analyze import nodes to determine layers
@@ -175,6 +176,24 @@ export async function analyze(stylesheets: Stylesheet[]) {
               let layers = segment(part.slice(6, -1), ',').map(name => name.trim())
 
               sheet.layers!.push(...layers)
+            }
+          }
+        }
+
+        // Connect all stylesheets together in a dependency graph
+        // The way this works is it uses the knowledge that we have a list of
+        // the `@import` nodes that cause a given stylesheet to be imported.
+        // That import has a `source` pointing to parent stylesheet's file path
+        // which can be used to look it up
+        for (let sheet of stylesheets) {
+          for (let node of sheet.importRules ?? []) {
+            if (!node.source?.input.file) continue
+
+            let sourceFile = node.source.input.file
+
+            for (let parent of stylesheets) {
+              if (parent.file !== sourceFile) continue
+              sheet.parents!.add(parent)
             }
           }
         }
@@ -221,6 +240,9 @@ export async function prepare(stylesheet: Stylesheet) {
 }
 
 export async function split(stylesheets: Stylesheet[]) {
+  let utilitySheets = new Map<Stylesheet, Stylesheet>()
+  let newRules: postcss.AtRule[] = []
+
   for (let sheet of stylesheets.slice()) {
     if (!sheet.root) continue
     if (!sheet.file) continue
@@ -255,34 +277,52 @@ export async function split(stylesheets: Stylesheet[]) {
       return WalkAction.Skip
     })
 
-    stylesheets.push({
+    let utilitySheet: Stylesheet = {
       file: sheet.file.replace(/\.css$/, '.utilities.css'),
       root: utilities,
-    })
+    }
 
-    // Modify the import of this stylesheet to also import the new utilities stylesheet
-    // this has to be done transitively so we might end up introducing additional stylesheets
+    utilitySheets.set(sheet, utilitySheet)
+
+    // Add the import for the new utility file immediately following the old import
     for (let node of sheet.importRules ?? []) {
-      let parts = segment(node.params, ' ')
-
-      for (let i = 0; i < parts.length; ++i) {
-        let part = parts[i]
-        if (!part.startsWith('layer(')) continue
-        if (!part.endsWith(')')) continue
-
-        parts[i] = segment(part.slice(6, -1), ',')
-          .map(name => name.trim())
-          .filter(name => {
-            if (name === 'utilities') return false
-            if (name === 'components') return false
-            return true
-          })
-          .join(',')
-      }
-
-      node.params = parts.join(' ')
+      newRules.push(node.cloneAfter({
+        params: node.params.replace(/\.css(['"])/, '.utilities.css$1'),
+      }))
     }
   }
 
-  return stylesheets
+  // The new import rules should have just the filename import
+  // no layers, media queries, or anything else
+  for (let node of newRules) {
+    node.params = segment(node.params, ' ')[0]
+  }
+
+  for (let [originalSheet, utilitySheet] of utilitySheets) {
+    utilitySheet.parents = new Set(Array.from(originalSheet.parents ?? []).map(parent => {
+      return utilitySheets.get(parent) ?? parent
+    }))
+  }
+
+  stylesheets.push(...utilitySheets.values())
+
+  console.log(...stylesheets)
 }
+
+// @import './a.css' layer(utilities);
+//  -> @import './b.css';
+//    -> @import './c.css';
+//       -> .utility-class
+//       -> #main
+//    -> other stuff
+//  -> other stuff
+
+// @import './a.css' layer(utilities);
+//  -> @import './b.css';
+//    -> @import './c.css';
+//       -> #main
+//    -> other stuff
+// @import './a.utility.css';
+//  -> @import './b.utility.css';
+//    -> @import './c.utility.css';
+//       -> @utility .utility-class
