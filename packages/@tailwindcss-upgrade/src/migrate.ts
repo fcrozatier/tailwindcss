@@ -12,6 +12,7 @@ import { walk, WalkAction } from './utils/walk'
 
 export interface Stylesheet {
   file?: string
+  unlink?: boolean
 
   content?: string | null
   root?: postcss.Root | null
@@ -277,20 +278,89 @@ export async function split(stylesheets: Stylesheet[]) {
       return WalkAction.Skip
     })
 
-    let utilitySheet: Stylesheet = {
-      file: sheet.file.replace(/\.css$/, '.utilities.css'),
-      root: utilities,
-    }
-
-    utilitySheets.set(sheet, utilitySheet)
-
     // Add the import for the new utility file immediately following the old import
     for (let node of sheet.importRules ?? []) {
-      newRules.push(
-        node.cloneAfter({
-          params: node.params.replace(/\.css(['"])/, '.utilities.css$1'),
-        }),
-      )
+      // Only interested in the main import rule with the layer
+      if (!node.params.includes('layer(utilities)') && !node.params.includes('layer(components)')) {
+        continue
+      }
+
+      // We want to use the name of the main import, not the name of the
+      // transitive import.
+      //
+      // ```css
+      // /* index.css */
+      // @import "./a.css" layer(utilities);
+      //
+      // /* a.css */
+      // @import "./b.css";
+      //
+      // /* b.css */
+      // @layer utilities {
+      //   .foo {}
+      // }
+      // ```
+      //
+      // In this case we want `a.utilities.css` to be the name of the new file,
+      // not `b.utilities.css`. Every `@layer utilities` directive will be
+      // converted to `@utility` and will be hoisted to the `a.utilities.css`
+      // file.
+
+      let relativePath = /['"](.*?)['"]/g.exec(node.params)
+      if (!relativePath) continue // This should never happen
+      if (!node.source?.input.file) continue // This should never happen
+
+      let name = path.basename(relativePath[1])
+
+      let utilitySheet: Stylesheet = {
+        file: path.join(path.dirname(sheet.file), name.replace(/\.css$/, '.utilities.css')),
+        root: utilities,
+      }
+
+      utilitySheets.set(sheet, utilitySheet)
+
+      // Figure out the new import rule
+      let newParams = node.params.replace(/\.css(['"])/, '.utilities.css$1')
+
+      // Only add the new `@import` at-rule if it doesn't exist yet.
+      let existingNewImport = newRules.find((rule) => rule.params === newParams)
+      if (!existingNewImport) {
+        newRules.push(
+          node.cloneAfter({
+            params: newParams,
+          }),
+        )
+      }
+    }
+  }
+
+  // Merge utility sheets.
+  // It could be that the same type of file is created from two different
+  // locations. In this case, the final file will exist twice.
+  // E.g.:
+  //
+  // ```css
+  // /* index.css*/
+  // @import './a.css' layer(utilities);
+  //
+  // /* a.css */
+  // @import './b.css';
+  // .foo {}            /* <- generates a.utilities.css, key points to a.css */
+  //
+  // /* b.css */
+  // .bar {}            /* <- generates a.utilities.css, key points to b.css */
+  // ```
+  let mergedUtilitySheets = new Map<string, Stylesheet>()
+  for (let utilitySheet of utilitySheets.values()) {
+    if (!utilitySheet.file) continue // Should never happen
+
+    let existing = mergedUtilitySheets.get(utilitySheet.file)
+    if (!existing) {
+      mergedUtilitySheets.set(utilitySheet.file, utilitySheet)
+    } else {
+      // TODO: Not sure why a `prepend` is required instead of an `append`, but
+      // this results in the correct order.
+      existing.root?.prepend(utilitySheet.root?.nodes ?? [])
     }
   }
 
@@ -308,9 +378,84 @@ export async function split(stylesheets: Stylesheet[]) {
     )
   }
 
-  stylesheets.push(...utilitySheets.values())
+  stylesheets.push(...mergedUtilitySheets.values())
 
-  console.log(...stylesheets)
+  // At this point, we probably created `{name}.utilities.css` files. If the
+  // original `{name}.css` is empty, then we can optimize the output a bit more
+  // by re-using the original file but just getting rid of the `layer
+  // (utilities)` marker.
+  // If removing files means that some `@import` at-rules are now unnecessary, we
+  // can also remove those.
+  {
+    // 1. Get rid of empty files (and their imports)
+    let repeat = true
+    while (repeat) {
+      repeat = false
+      for (let stylesheet of stylesheets) {
+        // Was already marked to be removed, skip
+        if (stylesheet.unlink) continue
+
+        // Original content was not empty, but the new content is. Therefore we
+        // can mark the file for removal.
+        if (stylesheet.content?.trim() !== '' && stylesheet?.root?.toString().trim() === '') {
+          repeat = true
+          stylesheet.unlink = true
+
+          // Cleanup imports that are now unnecessary
+          for (let parent of stylesheet.parents ?? []) {
+            if (!parent.root) continue
+
+            walk(parent.root, (node) => {
+              if (node.type === 'atrule' && node.name === 'import') {
+                // TODO: Is there a better/cleaner way to figure this out?
+                let relativePath = /['"](.*?)['"]/g.exec(node.params)
+                if (!relativePath) return WalkAction.Skip
+                if (!node.source?.input.file) return WalkAction.Skip
+
+                let absolutePath = path.resolve(
+                  path.dirname(node.source.input.file),
+                  relativePath[1],
+                )
+                let isDirectImport = absolutePath === stylesheet.file
+                if (isDirectImport) {
+                  node.remove()
+                }
+              }
+            })
+          }
+        }
+      }
+    }
+
+    // 2. Use `{name}.css` instead of `{name}.utilities.css` if the `{name}.css`
+    //    was marked for removal.
+    for (let [originalSheet, utilitySheet] of utilitySheets) {
+      // Original sheet was marked for removal, use the original file instead.
+      if (!originalSheet.unlink) continue
+
+      // Fixup the import rule
+      for (let parent of originalSheet.parents ?? []) {
+        if (!parent.root) continue
+
+        walk(parent.root, (node) => {
+          if (node.type === 'atrule' && node.name === 'import') {
+            let relativePath = /['"](.*?)['"]/g.exec(node.params)
+            if (!relativePath) return WalkAction.Skip
+            if (!node.source?.input.file) return WalkAction.Skip
+
+            let absolutePath = path.resolve(path.dirname(node.source.input.file), relativePath[1])
+            let isDirectImport = absolutePath === utilitySheet.file
+            if (isDirectImport) {
+              node.params = node.params.replace(/\.utilities\.css(['"])/, '.css$1')
+            }
+          }
+        })
+      }
+
+      // Fixup the file path
+      utilitySheet.file = utilitySheet.file?.replace(/\.utilities\.css$/, '.css')
+    }
+  }
 }
 
 // @import './a.css' layer(utilities);
