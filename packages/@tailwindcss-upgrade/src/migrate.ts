@@ -2,13 +2,13 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import postcss, { AtRule } from 'postcss'
 import postcssImport from 'postcss-import'
+import { segment } from '../../tailwindcss/src/utils/segment'
 import { formatNodes } from './codemods/format-nodes'
 import { migrateAtApply } from './codemods/migrate-at-apply'
 import { migrateAtLayerUtilities } from './codemods/migrate-at-layer-utilities'
 import { migrateMissingLayers } from './codemods/migrate-missing-layers'
 import { migrateTailwindDirectives } from './codemods/migrate-tailwind-directives'
 import { walk, WalkAction } from './utils/walk'
-import { segment } from '../../tailwindcss/src/utils/segment'
 
 export interface Stylesheet {
   file?: string
@@ -82,7 +82,7 @@ export async function analyze(stylesheets: Stylesheet[]) {
           // Duplicate the `@import` rule
           // this will be the one that `postcss-import` processes
           node.cloneAfter({
-            params: `${node.params} ${mediaWrapper}`
+            params: `${node.params} ${mediaWrapper}`,
           })
 
           // Replace the original `@import` rule with a dummy comment
@@ -173,7 +173,7 @@ export async function analyze(stylesheets: Stylesheet[]) {
               if (!part.startsWith('layer(')) continue
               if (!part.endsWith(')')) continue
 
-              let layers = segment(part.slice(6, -1), ',').map(name => name.trim())
+              let layers = segment(part.slice(6, -1), ',').map((name) => name.trim())
 
               sheet.layers!.push(...layers)
             }
@@ -286,9 +286,11 @@ export async function split(stylesheets: Stylesheet[]) {
 
     // Add the import for the new utility file immediately following the old import
     for (let node of sheet.importRules ?? []) {
-      newRules.push(node.cloneAfter({
-        params: node.params.replace(/\.css(['"])/, '.utilities.css$1'),
-      }))
+      newRules.push(
+        node.cloneAfter({
+          params: node.params.replace(/\.css(['"])/, '.utilities.css$1'),
+        }),
+      )
     }
   }
 
@@ -299,9 +301,11 @@ export async function split(stylesheets: Stylesheet[]) {
   }
 
   for (let [originalSheet, utilitySheet] of utilitySheets) {
-    utilitySheet.parents = new Set(Array.from(originalSheet.parents ?? []).map(parent => {
-      return utilitySheets.get(parent) ?? parent
-    }))
+    utilitySheet.parents = new Set(
+      Array.from(originalSheet.parents ?? []).map((parent) => {
+        return utilitySheets.get(parent) ?? parent
+      }),
+    )
   }
 
   stylesheets.push(...utilitySheets.values())

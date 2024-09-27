@@ -2,7 +2,6 @@
 
 import { globby } from 'globby'
 import path from 'node:path'
-import * as fs from 'node:fs/promises'
 import type { DesignSystem } from '../../tailwindcss/src/design-system'
 import { help } from './commands/help'
 import {
